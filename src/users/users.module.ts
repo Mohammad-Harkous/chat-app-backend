@@ -7,12 +7,14 @@ import { FriendsService } from './friends.service';
 import { User } from './entities/user.entity';
 import { FriendRequest } from './entities/friend-request.entity';
 import { Friendship } from './entities/friendship.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([
     User,
     FriendRequest,
-    Friendship,     
+    Friendship,
+     RefreshToken,     
   ])],
   controllers: [
     UsersController, 

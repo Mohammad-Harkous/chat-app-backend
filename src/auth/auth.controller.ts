@@ -8,8 +8,9 @@ import {
   UseInterceptors,
   ClassSerializerInterceptor,
   Res,
-  UseGuards,
   Req,
+  UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiCookieAuth } from '@nestjs/swagger';
 import { Response, Request } from 'express';
@@ -29,7 +30,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({
     status: 201,
-    description: 'User successfully registered. Access token set in HTTP-only cookie.',
+    description: 'User successfully registered. Tokens set in HTTP-only cookies.',
   })
   @ApiResponse({ status: 409, description: 'Email or username already exists' })
   @ApiResponse({ status: 400, description: 'Validation error' })
@@ -45,7 +46,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Login with email/username and password' })
   @ApiResponse({
     status: 200,
-    description: 'User successfully logged in. Access token set in HTTP-only cookie.',
+    description: 'User successfully logged in. Tokens set in HTTP-only cookies.',
   })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(
@@ -53,6 +54,24 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ user: User }> {
     return this.authService.login(loginDto, res);
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Refresh access token using refresh token' })
+  @ApiResponse({ status: 200, description: 'Access token refreshed successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ message: string }> {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token not found');
+    }
+
+    return this.authService.refresh(refreshToken, res);
   }
 
   @Post('logout')
@@ -63,9 +82,11 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Successfully logged out' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async logout(
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
-    return this.authService.logout(res);
+    const user = req.user as User;
+    return this.authService.logout(user.id, res);
   }
 
   @Get('me')

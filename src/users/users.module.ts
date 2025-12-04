@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef} from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersController } from './users.controller';
 import { FriendsController } from './friends.controller';
@@ -8,14 +8,18 @@ import { User } from './entities/user.entity';
 import { FriendRequest } from './entities/friend-request.entity';
 import { Friendship } from './entities/friendship.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
+import { WebSocketModule } from '../websocket/websocket.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([
-    User,
-    FriendRequest,
-    Friendship,
-     RefreshToken,     
-  ])],
+  imports: [
+    TypeOrmModule.forFeature([
+      User,
+      FriendRequest,
+      Friendship,
+      RefreshToken,    
+    ]),
+   forwardRef(() => WebSocketModule), 
+  ],
   controllers: [
     UsersController, 
     FriendsController,

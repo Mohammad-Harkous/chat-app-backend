@@ -1,9 +1,10 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FriendRequest, FriendRequestStatus } from './entities/friend-request.entity';
 import { Friendship } from './entities/friendship.entity';
 import { User } from './entities/user.entity';
+import { EventsGateway } from '../websocket/websocket.gateway';
 
 @Injectable()
 export class FriendsService {
@@ -14,6 +15,8 @@ export class FriendsService {
     private readonly friendshipRepository: Repository<Friendship>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @Inject(forwardRef(() => EventsGateway)) 
+    private readonly wsGateway: EventsGateway,
   ) {}
 
   // Send friend request
@@ -47,7 +50,7 @@ export class FriendsService {
       if (existingRequest.status === FriendRequestStatus.PENDING) {
         throw new BadRequestException('Friend request already exists');
       }
-      // If request was rejected/ignored, allow creating a new one
+      // If request was ignored, allow creating a new one
       await this.friendRequestRepository.remove(existingRequest);
     }
 
@@ -58,7 +61,25 @@ export class FriendsService {
       status: FriendRequestStatus.PENDING,
     });
 
-    return this.friendRequestRepository.save(friendRequest);
+     const savedRequest = await this.friendRequestRepository.save(friendRequest);
+
+    // Load the full request with relations before emitting
+    const fullRequest = await this.friendRequestRepository.findOne({
+      where: { id: savedRequest.id },
+      relations: ['sender', 'receiver'], // Load sender and receiver objects
+    });
+
+    if (!fullRequest) {
+      throw new NotFoundException('Failed to load friend request');
+    }
+
+    // Emit WebSocket event with full data
+    this.wsGateway.emitToUser(receiverId, 'friendRequestReceived', {
+      request: fullRequest,
+    });
+
+    return fullRequest;
+
   }
 
   // Get pending friend requests (received by user)
@@ -87,11 +108,12 @@ export class FriendsService {
   async respondToFriendRequest(
     requestId: string,
     userId: string,
-    action: 'accept' | 'reject' | 'ignore',
+    action: 'accept' | 'ignore',
   ): Promise<FriendRequest> {
     // Find the request
     const request = await this.friendRequestRepository.findOne({
       where: { id: requestId },
+       relations: ['sender', 'receiver'],
     });
 
     if (!request) {
@@ -110,18 +132,26 @@ export class FriendsService {
 
       // Create friendship (using the "lower ID first" rule)
       await this.createFriendship(request.sender.id, request.receiver.id);
-    } else if (action === 'reject') {
-      request.status = FriendRequestStatus.REJECTED;
-      await this.friendRequestRepository.save(request);
+
+      // Emit WebSocket event to sender
+      this.wsGateway.emitToUser(request.sender.id, 'friendRequestAccepted', {
+        request: request,
+        user: request.receiver,
+      });
     } else if (action === 'ignore') {
       request.status = FriendRequestStatus.IGNORED;
       await this.friendRequestRepository.save(request);
     }
 
+    // update sender's UI (no toast notification)
+    this.wsGateway.emitToUser(request.sender.id, 'friendRequestIgnored', {
+      requestId: request.id,
+    });
+
     return request;
   }
 
-  // Create friendship (COMPLEX LOGIC - explained below)
+  // Create friendship 
   private async createFriendship(user1Id: string, user2Id: string): Promise<Friendship> {
     // Sort IDs to ensure user_id_1 < user_id_2
     const [smallerId, largerId] = [user1Id, user2Id].sort();

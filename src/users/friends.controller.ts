@@ -84,11 +84,9 @@ export class FriendsController {
     let message = '';
     if (dto.action === 'accept') {
       message = 'Friend request accepted';
-    } else if (dto.action === 'reject') {
-      message = 'Friend request rejected';
-    } else {
+    } else if (dto.action === 'ignore') {
       message = 'Friend request ignored';
-    }
+    } 
     
     return { message, request };
   }

@@ -3,7 +3,6 @@ import { IsEnum, IsNotEmpty } from 'class-validator';
 
 export enum FriendRequestAction {
   ACCEPT = 'accept',
-  REJECT = 'reject',
   IGNORE = 'ignore',
 }
 

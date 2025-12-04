@@ -144,9 +144,10 @@ async refresh(refreshTokenString: string, res: Response): Promise<{ message: str
 }
 
   async logout(userId: string, res: Response): Promise<{ message: string }> {
+  try {
     // Revoke all refresh tokens for this user
     await this.refreshTokenRepository.update(
-      { user: { id: userId } },
+      { user: { id: userId }, revokedAt: IsNull() }, // Only update non-revoked tokens
       { revokedAt: new Date() },
     );
 
@@ -154,7 +155,12 @@ async refresh(refreshTokenString: string, res: Response): Promise<{ message: str
     this.clearTokenCookies(res);
 
     return { message: 'Logged out successfully' };
+  } catch (error) {
+    // Even if database fails, clear cookies
+    this.clearTokenCookies(res);
+    return { message: 'Logged out successfully' };
   }
+}
 
   async validateUser(userId: string): Promise<User> {
     return this.usersService.findById(userId);

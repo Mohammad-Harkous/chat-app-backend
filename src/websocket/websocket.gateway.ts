@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Logger, UnauthorizedException, Inject, forwardRef } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
+import { RedisService } from 'src/redis/redis.service';
 
 @WebSocketGateway({
   cors: {
@@ -24,13 +25,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server: Server;
 
   private readonly logger = new Logger(EventsGateway.name);
-  private connectedUsers = new Map<string, string>(); // userId -> socketId
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
      @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
+    private readonly redisService: RedisService,
   ) {
     this.logger.log('🚀 EventsGateway initialized');
   }
@@ -71,8 +72,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Join user to their personal room
       client.join(`user:${payload.sub}`);
 
-      // Track connected user
-      this.connectedUsers.set(payload.sub, client.id);
+      //  Store in Redis
+      await this.redisService.addOnlineUser(payload.sub, client.id);
 
       // Update database: set user online
       await this.usersService.updateOnlineStatus(payload.sub, true);
@@ -95,8 +96,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const username = client.data.username;
 
     if (userId) {
-      // Remove from connected users
-      this.connectedUsers.delete(userId);
+       // Remove from Redis
+      await this.redisService.removeOnlineUser(userId);
 
       // Update database: set user offline
       await this.usersService.updateOnlineStatus(userId, false);
@@ -111,6 +112,43 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // Typing indicators
+  @SubscribeMessage('typing')
+  async handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { conversationId: string; recipientId: string },
+  ) {
+    this.logger.log(`⌨️ User ${client.data.username} is typing in conversation ${data.conversationId}`);
+
+    // Store in Redis with auto-expiration
+    await this.redisService.setTyping(data.conversationId, client.data.userId);
+    
+    // Emit to recipient only
+    this.server.to(`user:${data.recipientId}`).emit('userTyping', {
+      conversationId: data.conversationId,
+      userId: client.data.userId,
+      username: client.data.username,
+    });
+  }
+
+  @SubscribeMessage('stopTyping')
+  async handleStopTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { conversationId: string; recipientId: string },
+  ) {
+    this.logger.log(`⌨️ User ${client.data.username} stopped typing`);
+
+    // Remove from Redis
+    await this.redisService.removeTyping(data.conversationId, client.data.userId);
+    
+    // Emit to recipient only
+    this.server.to(`user:${data.recipientId}`).emit('userStoppedTyping', {
+      conversationId: data.conversationId,
+      userId: client.data.userId,
+    });
+  }
+
+
   // Send event to specific user
   emitToUser(userId: string, event: string, data: any) {
     this.server.to(`user:${userId}`).emit(event, data);
@@ -122,12 +160,14 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // Get online users count
-  getConnectedUsersCount(): number {
-    return this.connectedUsers.size;
+  async getConnectedUsersCount(): Promise<number> {
+    // Get from Redis
+    return await this.redisService.getOnlineUsersCount();
   }
 
   // Check if user is online
-  isUserOnline(userId: string): boolean {
-    return this.connectedUsers.has(userId);
+  async isUserOnline(userId: string): Promise<boolean> {
+    // Check from Redis
+    return await this.redisService.isUserOnline(userId);
   }
 }

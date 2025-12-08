@@ -5,6 +5,8 @@ import { getTypeOrmConfig } from './config/typeorm.config';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { WebSocketModule } from './websocket/websocket.module';
+import { ConversationsModule } from './conversations/conversations.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -20,9 +22,11 @@ import { WebSocketModule } from './websocket/websocket.module';
       inject: [ConfigService],
       useFactory: getTypeOrmConfig,
     }),
-    UsersModule,
+    RedisModule,
     AuthModule,
+    UsersModule,
     WebSocketModule,
+    ConversationsModule,
   ],
   controllers: [],
   providers: [],

@@ -142,6 +142,14 @@ async refresh(refreshTokenString: string, res: Response): Promise<{ message: str
     throw new UnauthorizedException('Invalid refresh token');
   }
 }
+ async getMe(userId: string) {
+  // Fetch fresh user data from database
+  const user = await this.usersService.findById(userId);
+  
+  console.log(`👤 /auth/me: User ${userId.substring(0, 8)}, isOnline: ${user.isOnline}`);
+  
+  return { user };
+  }
 
   async logout(userId: string, res: Response): Promise<{ message: string }> {
   try {

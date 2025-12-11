@@ -19,6 +19,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { User } from '../users/entities/user.entity';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GetUser } from './decorators/get-user.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -95,7 +96,9 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiResponse({ status: 200, description: 'Returns current user' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getCurrentUser(@Req() req: Request): Promise<{ user: User }> {
-    return { user: req.user as User };
+  async getCurrentUser(@GetUser() user: User): Promise<{ user: User }> {
+    // Fetch fresh user data from database (not from JWT payload)
+    const freshUser = await this.authService.getMe(user.id);
+    return freshUser;
   }
 }

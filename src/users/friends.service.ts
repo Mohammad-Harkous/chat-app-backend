@@ -5,6 +5,7 @@ import { FriendRequest, FriendRequestStatus } from './entities/friend-request.en
 import { Friendship } from './entities/friendship.entity';
 import { User } from './entities/user.entity';
 import { EventsGateway } from '../websocket/websocket.gateway';
+import { UsersService } from './users.service';
 
 @Injectable()
 export class FriendsService {
@@ -13,6 +14,7 @@ export class FriendsService {
     private readonly friendRequestRepository: Repository<FriendRequest>,
     @InjectRepository(Friendship)
     private readonly friendshipRepository: Repository<Friendship>,
+     private readonly usersService: UsersService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @Inject(forwardRef(() => EventsGateway)) 
@@ -208,5 +210,45 @@ export class FriendsService {
       .getMany();
 
     return users;
+  }
+
+  // Remove a friend (unfriend)
+  async removeFriend(userId: string, friendId: string): Promise<void> {
+    console.log(`👋 User ${userId.substring(0, 8)} unfriending ${friendId.substring(0, 8)}`);
+    
+    // Verify they are friends
+    const areFriends = await this.areFriends(userId, friendId);
+    if (!areFriends) {
+      throw new BadRequestException('You are not friends with this user');
+    }
+
+    // Get usernames for notifications
+    const user = await this.usersService.findById(userId);
+    const friend = await this.usersService.findById(friendId);
+
+    // Find and remove both directions of friendship
+    const friendships = await this.friendshipRepository.find({
+      where: [
+        { user1: { id: userId }, user2: { id: friendId } },
+        { user1: { id: friendId }, user2: { id: userId } },
+      ],
+    });
+    
+    if (friendships.length > 0) {
+      await this.friendshipRepository.remove(friendships);
+      console.log(`✅ Removed ${friendships.length} friendship records`);
+    }
+
+    // ONLY emit to the clients to update their UIs
+    // We just update UI silently
+    this.wsGateway.emitToUser(friendId, 'friendRemoved', {
+      userId: userId,
+    });
+
+    this.wsGateway.emitToUser(userId, 'friendRemoved', {
+      userId: friendId,
+    });
+
+    console.log(`📡 Emitted friendRemoved events to both users`);
   }
 }

@@ -40,7 +40,7 @@ export class ConversationsService {
       throw new BadRequestException('You can only chat with friends');
     }
 
-    // Check if conversation already exists (either direction)
+    // Find existing conversation
     const existingConversation = await this.conversationRepository.findOne({
       where: [
         { participant1: { id: userId }, participant2: { id: participantId } },
@@ -49,41 +49,59 @@ export class ConversationsService {
       relations: ['participant1', 'participant2'],
     });
 
-    // if (existingConversation) {
-    //   return existingConversation;
-    // }
-
+    // If conversation exists
     if (existingConversation) {
-    // 🆕 If conversation was deleted by this user, restore it
-    const deletedBy = existingConversation.deletedBy || [];
-    if (deletedBy.includes(userId)) {
-      console.log(`♻️ Restoring conversation for user ${userId.substring(0, 8)}`);
+      const deletedBy = existingConversation.deletedBy || [];
+
+    // If both deleted it - clear messages for fresh start
+      if (deletedBy.includes(userId) && deletedBy.includes(participantId)) {
+        console.log(`🗑️ Both deleted - clearing messages for conversation ${existingConversation.id.substring(0, 8)}`);
+        
+        // ✅ FIXED: Use correct column name with underscore
+        const deleteResult = await this.messageRepository
+          .createQueryBuilder()
+          .delete()
+          .from(Message)
+          .where('conversation_id = :conversationId', { conversationId: existingConversation.id })
+          .execute();
+        
+        console.log(`🗑️ Deleted ${deleteResult.affected} messages`);
+        
+        await this.redisService.invalidateMessageCache(existingConversation.id);
+      }
       
+      // Remove current user from deletedBy
       const updatedDeletedBy = deletedBy.filter(id => id !== userId);
+      
       await this.conversationRepository.update(existingConversation.id, {
         deletedBy: updatedDeletedBy,
+        lastMessageAt: deletedBy.length === 2 ? null : existingConversation.lastMessageAt,
       });
       
-      // Reload conversation with updated data
-      const restoredConversation = await this.conversationRepository.findOne({
-        where: { id: existingConversation.id },
-        relations: ['participant1', 'participant2'],
-      });
-      
-      return restoredConversation || existingConversation;
+      console.log(`♻️ Restored conversation for user ${userId.substring(0, 8)}`);
+
+        // ✅ NEW: If other user had also deleted it, notify them to refresh
+      if (deletedBy.includes(participantId)) {
+        console.log(`📡 Notifying other user about conversation restoration`);
+        this.wsGateway.emitToUser(participantId, 'conversationRestored', {
+          conversationId: existingConversation.id,
+        });
+      }
+
+      return existingConversation;
     }
-    
-    return existingConversation;
-  }
 
     // Create new conversation
+    console.log(`✨ Creating new conversation`);
     const conversation = this.conversationRepository.create({
       participant1: { id: userId },
       participant2: { id: participantId },
+      deletedBy: [],
     });
 
     return this.conversationRepository.save(conversation);
   }
+
 
   // List all my chats
   // Get all conversations for a user
@@ -201,6 +219,7 @@ export class ConversationsService {
     
     if (cachedMessages.length > 0) {
       console.log(`💾 Returning ${cachedMessages.length} cached messages`);
+      console.log(`📊 First message isRead:`, cachedMessages[0]?.isRead);
       return cachedMessages;
     }
     
@@ -209,10 +228,15 @@ export class ConversationsService {
     console.log(`🗄️ Cache miss - fetching from database`);
     const messages = await this.messageRepository.find({
       where: { conversation: { id: conversationId } },
-      relations: ['sender'],
+      relations: ['sender', 'conversation'],
       order: { createdAt: 'ASC' },
       take: limit,
     });
+
+      console.log(`📊 Messages from DB:`, messages.map(m => ({
+    id: m.id.substring(0, 8),
+    isRead: m.isRead,  // ← Check this
+  })));
 
     // Cache for next time
     for (const message of messages) {
@@ -295,6 +319,21 @@ export class ConversationsService {
       );
 
       console.log(`📖 Updated ${messageIds.length} messages in database`);
+
+
+      // ✅ Re-cache updated messages with correct isRead status
+    const updatedMessages = await this.messageRepository.find({
+      where: { conversation: { id: conversationId } },
+      relations: ['sender', 'conversation'],
+      order: { createdAt: 'ASC' },
+      take: 50,
+    });
+
+        // Clear old cache and re-populate with fresh data
+    await this.redisService.invalidateMessageCache(conversationId);
+    for (const message of updatedMessages) {
+      await this.redisService.cacheMessage(conversationId, message);
+    }
 
       // IMPORTANT: Emit messageRead for EACH message
       unreadMessages.forEach((message) => {

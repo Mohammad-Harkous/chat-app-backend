@@ -42,7 +42,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Extract token from cookie (sent automatically by browser)
       const cookies = client.handshake.headers.cookie;
-      this.logger.log(`Cookies received: ${cookies}`);
+      this.logger.log(`Authentication cookies present: ${!!cookies}`);
 
       if (!cookies) {
         throw new UnauthorizedException('No cookies provided');
@@ -55,8 +55,6 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!token) {
         throw new UnauthorizedException('No access token in cookies');
       }
-
-      this.logger.log(`Token extracted: ${token.substring(0, 20)}...`);
 
       // Verify token
       const payload = this.jwtService.verify(token, {

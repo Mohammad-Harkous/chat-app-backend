@@ -56,7 +56,6 @@ export class UsersController {
       @GetUser() user: User,  // ← Make sure @GetUser() is here
       @Param('friendId') friendId: string,
     ) {
-      console.log('🔍 User from decorator:', user?.id);  // Debug log
       
       if (!user) {
         throw new Error('User not authenticated');

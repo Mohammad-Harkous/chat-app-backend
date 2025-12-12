@@ -11,6 +11,14 @@ export const getTypeOrmConfig = (
   password: configService.get('DB_PASSWORD'),
   database: configService.get('DB_DATABASE'),
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-  synchronize: configService.get('NODE_ENV') === 'development', // ⚠️ Only for development!
+  synchronize: configService.get('NODE_ENV') === 'development',
+  migrationsRun: configService.get('NODE_ENV') === 'production',
+  migrations: ['dist/migrations/*.js'],
+  
   logging: configService.get('NODE_ENV') === 'development',
+  ssl:
+    configService.get('NODE_ENV') === 'production'
+      ? { rejectUnauthorized: false }
+      : false,
+  
 });
